@@ -1,11 +1,11 @@
 [package]
 name = "dfplayer-async"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 description = "A simple embedded-hal-async driver for the DFPlayer mini MP3 module."
 keywords = ["no-std", "embedded-hal-async", "mp3", "dfplayer", "driver"]
 categories = ["embedded", "hardware-support", "no-std"]
-repository = "https://github.com/Laboratorios-Gensokyo/dfplayer-serial"
+repository = "https://github.com/1-rafael-1/dfplayer-async/"
 documentation = "https://docs.rs/dfplayer-async/"
 license = "MIT"
 readme = "README.md"
