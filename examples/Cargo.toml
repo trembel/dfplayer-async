@@ -1,0 +1,43 @@
+[package]
+name = "examples"
+version = "0.1.0"
+edition = "2024"
+
+[[example]]
+name = "basic"
+path = "src/basic.rs"
+
+[[example]]
+name = "query"
+path = "src/query.rs"
+
+[dependencies]
+embassy-rp = { version = "0.3.1", features = [
+    "defmt",
+    "unstable-pac",
+    "time-driver",
+    "critical-section-impl",
+    "rp235xa",
+] }
+embassy-embedded-hal = { version = "0.3.0", features = ["defmt"] }
+embassy-executor = { version = "0.7.0", features = [
+    "task-arena-size-98304",
+    "arch-cortex-m",
+    "executor-thread",
+    "executor-interrupt",
+    "defmt",
+] }
+embassy-time = { version = "0.4.0", features = [
+    "defmt",
+    "defmt-timestamp-uptime",
+] }
+defmt = "0.3"
+defmt-rtt = "0.4"
+cortex-m-rt = "0.7.5"
+critical-section = "1.2.0"
+panic-probe = { version = "0.3", features = ["print-defmt"] }
+embedded-io-async = "0.6.1"
+static_cell = "2.1.0"
+
+# dependency to dfplayer-async crate in the parent directory, with defmt feature enabled
+dfplayer-async = { path = "..", features = [] }
