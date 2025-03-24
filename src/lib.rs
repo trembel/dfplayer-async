@@ -55,7 +55,7 @@ use embedded_hal_async::delay::DelayNs;
 use embedded_io_async::{Read, ReadReady, Write};
 
 #[cfg(feature = "defmt")]
-use defmt::{info, Debug2Format};
+use defmt::{Debug2Format, info};
 
 // Protocol constants
 const START_BYTE: u8 = 0x7E;
@@ -1465,6 +1465,66 @@ where
     /// Returns the current equalizer setting (0-5) or an error.
     pub async fn query_eq(&mut self) -> Result<u8, Error<S::Error>> {
         self.send_command(MessageData::new(Command::QueryEQ, 0, 0))
+            .await?;
+        Ok(self.last_response.param_l)
+    }
+
+    /// Send the device to sleep mode
+    ///
+    /// Puts the DFPlayer into low-power sleep mode. In this mode, the device
+    /// will not respond to most commands until woken up.
+    ///
+    /// Note: While in sleep mode, the device will return `ModuleError::Sleeping`
+    /// for most commands.
+    pub async fn sleep(&mut self) -> Result<(), Error<S::Error>> {
+        self.send_command(MessageData::new(Command::EnterSleepMode, 0, 0))
+            .await
+    }
+
+    /// Wake up the device from sleep mode
+    ///
+    /// Attempts to wake up the DFPlayer from sleep mode using the wake up command (0x0B).
+    /// Since this command is reported to be unreliable on some modules, it can
+    /// optionally fall back to a reset if specified.
+    ///
+    /// # Arguments
+    /// * `reset_if_needed` - Whether to perform a reset if the normal wake up command fails
+    /// * `reset_duration_override` - Optional override for reset delay duration (ms) if reset is used
+    pub async fn wake_up(
+        &mut self,
+        reset_if_needed: bool,
+        reset_duration_override: Option<u64>,
+    ) -> Result<(), Error<S::Error>> {
+        // First try the normal wake command
+        let result = self
+            .send_command(MessageData::new(Command::EnterNormalMode, 0, 0))
+            .await;
+
+        // If the command succeeded or we don't want to try reset, return the result
+        if result.is_ok() || !reset_if_needed {
+            return result;
+        }
+
+        // If we get here, the normal wake command failed and we want to try reset
+        #[cfg(feature = "defmt")]
+        info!("Normal wake failed, trying reset");
+
+        // Fall back to reset as a more reliable way to wake the device
+        self.reset(reset_duration_override).await
+    }
+
+    /// Query the current status of the device
+    ///
+    /// Returns the current status byte or an error. The status byte indicates:
+    /// - If a USB disk is inserted (0x01)
+    /// - If a TF card is inserted (0x02)
+    /// - If a USB flash drive is inserted (0x04)
+    /// - If the device is playing (0x08)
+    /// - If the device is paused (0x10)
+    ///
+    /// The returned value is a combination (binary OR) of these flags.
+    pub async fn query_status(&mut self) -> Result<u8, Error<S::Error>> {
+        self.send_command(MessageData::new(Command::QueryStatus, 0, 0))
             .await?;
         Ok(self.last_response.param_l)
     }
