@@ -1353,102 +1353,10 @@ where
     }
 
     /// Query the total number of tracks on the SD card
-    ///
-    /// Returns the number of tracks on the SD card.
-    ///
-    /// This method implements a robust strategy for obtaining track counts:
-    /// - Sends the query command and processes immediate responses
-    /// - For non-feedback mode, waits for delayed responses with multiple attempts
-    /// - Returns 0 if no tracks are found or the count couldn't be retrieved
-    ///
-    /// The track count retrieval is one of the most timing-sensitive operations
-    /// of the DFPlayer module and may require multiple attempts.
     pub async fn query_tracks_sd(&mut self) -> Result<u16, Error<S::Error>> {
-        // Send the command
-        let result = self
-            .send_command(MessageData::new(Command::QueryTrackCntSD, 0, 0))
-            .await;
-
-        // If we got a command error that wasn't BrokenMessage, return it
-        if let Err(e) = result {
-            match e {
-                Error::BrokenMessage => {
-                    // We'll continue and try to get a delayed response
-                    #[cfg(feature = "defmt")]
-                    info!(
-                        "Initial track count query failed, trying delayed response"
-                    );
-                }
-                _ => return Err(e),
-            }
-        }
-
-        // If we're in non-feedback mode, wait for delayed response
-        if !self.feedback_enable {
-            // Wait longer for delayed response - often track count takes a while
-            self.delay.delay_ms(500).await;
-
-            // Try to read the delayed response with multiple attempts
-            for attempt in 1..=3 {
-                let mut buffer = [0u8; 32];
-                let bytes_read = match self.port.read(&mut buffer).await {
-                    Ok(n) => n,
-                    Err(_) => {
-                        // If we can't read, wait and try again
-                        self.delay.delay_ms(100).await;
-                        continue;
-                    }
-                };
-
-                #[cfg(feature = "defmt")]
-                if bytes_read > 0 {
-                    info!(
-                        "Delayed response (attempt {}): {:?}",
-                        attempt,
-                        &buffer[..bytes_read]
-                    );
-                }
-
-                // Check for track count response in the buffer
-                for i in 0..bytes_read.saturating_sub(9) {
-                    if buffer[i] == START_BYTE
-                        && buffer[i + INDEX_CMD]
-                            == Command::QueryTrackCntSD as u8
-                        && buffer[i + 9] == END_BYTE
-                    {
-                        // Found track count response
-                        let track_count = buffer[i + INDEX_PARAM_L];
-
-                        #[cfg(feature = "defmt")]
-                        info!("Found delayed track count: {}", track_count);
-
-                        // Update last_response
-                        self.last_response.command = Command::QueryTrackCntSD;
-                        self.last_response.param_h = buffer[i + INDEX_PARAM_H];
-                        self.last_response.param_l = track_count;
-
-                        return Ok(track_count as u16);
-                    }
-                }
-
-                // If we didn't find a response, wait and try again
-                if attempt < 3 {
-                    self.delay.delay_ms(150).await;
-                }
-            }
-        }
-
-        // If we have a track count response, use it
-        if self.last_response.command == Command::QueryTrackCntSD {
-            return Ok(self.last_response.param_l as u16);
-        }
-
-        // No valid track count found
-        #[cfg(feature = "defmt")]
-        info!("Failed to get track count after multiple attempts");
-
-        // For the special case of no tracks found, return 0
-        Ok(0)
+        self.send_command(MessageData::new(Command::QueryTrackCntSD, 0, 0))
+            .await?;
+        Ok(self.last_response.param_l as u16)
     }
 
     /// Query the total number of tracks in a specific folder
@@ -1463,6 +1371,16 @@ where
         ))
         .await?;
         Ok(self.last_response.param_l as u16)
+    }
+
+    // Query the currently playing track number on the SD card
+    pub async fn query_current_track_sd(
+        &mut self,
+    ) -> Result<u16, Error<S::Error>> {
+        self.send_command(MessageData::new(Command::QueryCurrentTrackSD, 0, 0))
+            .await?;
+        Ok(((self.last_response.param_h as u16) << 8)
+            | self.last_response.param_l as u16)
     }
 
     /// Query the current volume setting
