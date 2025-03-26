@@ -1451,6 +1451,20 @@ where
         Ok(0)
     }
 
+    /// Query the total number of tracks in a specific folder
+    pub async fn query_tracks_folder(
+        &mut self,
+        folder: u8,
+    ) -> Result<u16, Error<S::Error>> {
+        self.send_command(MessageData::new(
+            Command::QueryFolderTrackCnt,
+            0,
+            folder,
+        ))
+        .await?;
+        Ok(self.last_response.param_l as u16)
+    }
+
     /// Query the current volume setting
     ///
     /// Returns the current volume level (0-30) or an error.
