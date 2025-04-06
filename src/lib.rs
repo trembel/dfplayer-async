@@ -55,7 +55,7 @@ use embedded_hal_async::delay::DelayNs;
 use embedded_io_async::{Read, ReadReady, Write};
 
 #[cfg(feature = "defmt")]
-use defmt::{info, Debug2Format};
+use defmt::{Debug2Format, info};
 
 // Protocol constants
 const START_BYTE: u8 = 0x7E;
@@ -1353,102 +1353,34 @@ where
     }
 
     /// Query the total number of tracks on the SD card
-    ///
-    /// Returns the number of tracks on the SD card.
-    ///
-    /// This method implements a robust strategy for obtaining track counts:
-    /// - Sends the query command and processes immediate responses
-    /// - For non-feedback mode, waits for delayed responses with multiple attempts
-    /// - Returns 0 if no tracks are found or the count couldn't be retrieved
-    ///
-    /// The track count retrieval is one of the most timing-sensitive operations
-    /// of the DFPlayer module and may require multiple attempts.
     pub async fn query_tracks_sd(&mut self) -> Result<u16, Error<S::Error>> {
-        // Send the command
-        let result = self
-            .send_command(MessageData::new(Command::QueryTrackCntSD, 0, 0))
-            .await;
+        self.send_command(MessageData::new(Command::QueryTrackCntSD, 0, 0))
+            .await?;
+        Ok(self.last_response.param_l as u16)
+    }
 
-        // If we got a command error that wasn't BrokenMessage, return it
-        if let Err(e) = result {
-            match e {
-                Error::BrokenMessage => {
-                    // We'll continue and try to get a delayed response
-                    #[cfg(feature = "defmt")]
-                    info!(
-                        "Initial track count query failed, trying delayed response"
-                    );
-                }
-                _ => return Err(e),
-            }
-        }
+    /// Query the total number of tracks in a specific folder
+    pub async fn query_tracks_folder(
+        &mut self,
+        folder: u8,
+    ) -> Result<u16, Error<S::Error>> {
+        self.send_command(MessageData::new(
+            Command::QueryFolderTrackCnt,
+            0,
+            folder,
+        ))
+        .await?;
+        Ok(self.last_response.param_l as u16)
+    }
 
-        // If we're in non-feedback mode, wait for delayed response
-        if !self.feedback_enable {
-            // Wait longer for delayed response - often track count takes a while
-            self.delay.delay_ms(500).await;
-
-            // Try to read the delayed response with multiple attempts
-            for attempt in 1..=3 {
-                let mut buffer = [0u8; 32];
-                let bytes_read = match self.port.read(&mut buffer).await {
-                    Ok(n) => n,
-                    Err(_) => {
-                        // If we can't read, wait and try again
-                        self.delay.delay_ms(100).await;
-                        continue;
-                    }
-                };
-
-                #[cfg(feature = "defmt")]
-                if bytes_read > 0 {
-                    info!(
-                        "Delayed response (attempt {}): {:?}",
-                        attempt,
-                        &buffer[..bytes_read]
-                    );
-                }
-
-                // Check for track count response in the buffer
-                for i in 0..bytes_read.saturating_sub(9) {
-                    if buffer[i] == START_BYTE
-                        && buffer[i + INDEX_CMD]
-                            == Command::QueryTrackCntSD as u8
-                        && buffer[i + 9] == END_BYTE
-                    {
-                        // Found track count response
-                        let track_count = buffer[i + INDEX_PARAM_L];
-
-                        #[cfg(feature = "defmt")]
-                        info!("Found delayed track count: {}", track_count);
-
-                        // Update last_response
-                        self.last_response.command = Command::QueryTrackCntSD;
-                        self.last_response.param_h = buffer[i + INDEX_PARAM_H];
-                        self.last_response.param_l = track_count;
-
-                        return Ok(track_count as u16);
-                    }
-                }
-
-                // If we didn't find a response, wait and try again
-                if attempt < 3 {
-                    self.delay.delay_ms(150).await;
-                }
-            }
-        }
-
-        // If we have a track count response, use it
-        if self.last_response.command == Command::QueryTrackCntSD {
-            return Ok(self.last_response.param_l as u16);
-        }
-
-        // No valid track count found
-        #[cfg(feature = "defmt")]
-        info!("Failed to get track count after multiple attempts");
-
-        // For the special case of no tracks found, return 0
-        Ok(0)
+    // Query the currently playing track number on the SD card
+    pub async fn query_current_track_sd(
+        &mut self,
+    ) -> Result<u16, Error<S::Error>> {
+        self.send_command(MessageData::new(Command::QueryCurrentTrackSD, 0, 0))
+            .await?;
+        Ok(((self.last_response.param_h as u16) << 8)
+            | self.last_response.param_l as u16)
     }
 
     /// Query the current volume setting
@@ -1465,6 +1397,66 @@ where
     /// Returns the current equalizer setting (0-5) or an error.
     pub async fn query_eq(&mut self) -> Result<u8, Error<S::Error>> {
         self.send_command(MessageData::new(Command::QueryEQ, 0, 0))
+            .await?;
+        Ok(self.last_response.param_l)
+    }
+
+    /// Send the device to sleep mode
+    ///
+    /// Puts the DFPlayer into low-power sleep mode. In this mode, the device
+    /// will not respond to most commands until woken up.
+    ///
+    /// Note: While in sleep mode, the device will return `ModuleError::Sleeping`
+    /// for most commands.
+    pub async fn sleep(&mut self) -> Result<(), Error<S::Error>> {
+        self.send_command(MessageData::new(Command::EnterSleepMode, 0, 0))
+            .await
+    }
+
+    /// Wake up the device from sleep mode
+    ///
+    /// Attempts to wake up the DFPlayer from sleep mode using the wake up command (0x0B).
+    /// Since this command is reported to be unreliable on some modules, it can
+    /// optionally fall back to a reset if specified.
+    ///
+    /// # Arguments
+    /// * `reset_if_needed` - Whether to perform a reset if the normal wake up command fails
+    /// * `reset_duration_override` - Optional override for reset delay duration (ms) if reset is used
+    pub async fn wake_up(
+        &mut self,
+        reset_if_needed: bool,
+        reset_duration_override: Option<u64>,
+    ) -> Result<(), Error<S::Error>> {
+        // First try the normal wake command
+        let result = self
+            .send_command(MessageData::new(Command::EnterNormalMode, 0, 0))
+            .await;
+
+        // If the command succeeded or we don't want to try reset, return the result
+        if result.is_ok() || !reset_if_needed {
+            return result;
+        }
+
+        // If we get here, the normal wake command failed and we want to try reset
+        #[cfg(feature = "defmt")]
+        info!("Normal wake failed, trying reset");
+
+        // Fall back to reset as a more reliable way to wake the device
+        self.reset(reset_duration_override).await
+    }
+
+    /// Query the current status of the device
+    ///
+    /// Returns the current status byte or an error. The status byte indicates:
+    /// - If a USB disk is inserted (0x01)
+    /// - If a TF card is inserted (0x02)
+    /// - If a USB flash drive is inserted (0x04)
+    /// - If the device is playing (0x08)
+    /// - If the device is paused (0x10)
+    ///
+    /// The returned value is a combination (binary OR) of these flags.
+    pub async fn query_status(&mut self) -> Result<u8, Error<S::Error>> {
+        self.send_command(MessageData::new(Command::QueryStatus, 0, 0))
             .await?;
         Ok(self.last_response.param_l)
     }

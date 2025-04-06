@@ -32,7 +32,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-dfplayer-async = "0.2.0"
+dfplayer-async = "0.3.0"
 ```
 
 ## Examples
