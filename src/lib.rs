@@ -1106,7 +1106,7 @@ where
                 }
                 Ok(_n) => {
                     #[cfg(feature = "defmt")]
-                    info!("Cleared {} bytes: {:?}", n, &buffer[.._n]);
+                    info!("Cleared {} bytes: {:?}", _n, &buffer[.._n]);
                     // Short delay and try again
                     self.delay.delay_ms(10).await;
                 }
