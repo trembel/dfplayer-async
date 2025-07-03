@@ -1302,6 +1302,9 @@ where
     ///
     /// The DFPlayer supports organizing tracks in folders.
     /// This command plays a specific track from a specific folder.
+    /// Note that the DFPlayer can be very sensitive to folder and track
+    /// naming. Folders should typically be named with two digits (01-99)
+    /// and tracks with three digits (001-255).
     ///
     /// # Arguments
     /// * `folder` - Folder number (1-99)
@@ -1322,6 +1325,35 @@ where
             Command::PlayTrackInFolder,
             folder,
             track,
+        ))
+        .await
+    }
+
+    /// Play all tracks in a specific folder in a loop
+    ///
+    /// This command plays all tracks in a specified folder in sequence,
+    /// and loops back to the first track when the end is reached.
+    /// The folder names must be formatted with two digits, starting 
+    /// from 01 to 99 and not exceeding 99. With this command, you can 
+    /// store more than 255 tracks in a folder.
+    ///
+    /// # Arguments
+    /// * `folder` - Folder number (1-99)
+    ///
+    /// # Errors
+    /// Returns `Error::BadParameter` if the folder number is out of range.
+    pub async fn play_loop_folder(
+        &mut self,
+        folder: u8,
+    ) -> Result<(), Error<S::Error>> {
+        if folder == 0 || folder > 99 {
+            return Err(Error::BadParameter);
+        }
+
+        self.send_command(MessageData::new(
+            Command::PlayLoopFolder,
+            0,
+            folder,
         ))
         .await
     }
