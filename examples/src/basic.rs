@@ -21,7 +21,7 @@
 #![no_std]
 #![no_main]
 
-use defmt::{error, info, Debug2Format};
+use defmt::{Debug2Format, error, info};
 use dfplayer_async::{DfPlayer, Equalizer, TimeSource};
 use embassy_executor::Spawner;
 use embassy_rp::{
@@ -104,7 +104,7 @@ async fn main(_spawner: Spawner) {
     }
 
     // Create the DFPlayer Mini instance, handing in the UART instance and the TimeSource implementation as well as the other parameters.
-    let mut dfplayer = match DfPlayer::try_new(
+    let mut dfplayer = match DfPlayer::new(
         &mut uart,
         feedback_enable,
         timeout_ms,
