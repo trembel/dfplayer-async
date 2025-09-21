@@ -32,7 +32,7 @@
 //!
 //! // In your async function:
 //! async fn example(mut uart: impl embedded_io_async::Read + embedded_io_async::Write + embedded_io_async::ReadReady) {
-//!     let mut dfplayer = DfPlayer::try_new(
+//!     let mut dfplayer = DfPlayer::new(
 //!         &mut uart,      // UART port (9600 baud, 8N1)
 //!         false,          // feedback_enable
 //!         1000,           // timeout_ms
@@ -473,7 +473,7 @@ where
     /// * `time_source` - Source of time for timeout tracking
     /// * `delay` - Delay provider for timing operations
     /// * `reset_duration_override` - Optional override for reset delay duration (ms)
-    pub async fn try_new(
+    pub async fn new(
         port: &'a mut S,
         feedback_enable: bool,
         timeout_ms: u64,
@@ -481,6 +481,8 @@ where
         delay: D,
         reset_duration_override: Option<u64>,
     ) -> Result<Self, Error<S::Error>> {
+        #[cfg(feature = "defmt")]
+        info!("=== DfPlayer::new starting ===");
         let mut player = Self {
             port,
             feedback_enable,
@@ -496,28 +498,40 @@ where
         #[cfg(feature = "defmt")]
         info!("Clearing initial receive buffer");
         let _ = player.clear_receive_buffer().await;
+        #[cfg(feature = "defmt")]
+        info!("Initial buffer clear completed");
 
         // Send reset command with longer timeout for initialization
         #[cfg(feature = "defmt")]
-        info!("Sending reset command");
+        info!("About to send reset command");
 
         // Store original timeout and use a longer one for reset
         let original_timeout = player.timeout_ms;
         player.timeout_ms = 2000; // Longer timeout for reset
 
         // Send the reset command using the special init version that won't hang
+        #[cfg(feature = "defmt")]
+        info!("Calling send_command_init for reset");
         let _reset_result = player
             .send_command_init(MessageData::new(Command::Reset, 0, 0))
             .await;
+        #[cfg(feature = "defmt")]
+        info!("Reset command send_command_init completed");
 
         // Wait for device reset regardless of command result
         let wait_ms = reset_duration_override.unwrap_or(1500);
         #[cfg(feature = "defmt")]
         info!("Waiting {}ms for device reset", wait_ms);
         player.delay.delay_ms(wait_ms as u32).await;
+        #[cfg(feature = "defmt")]
+        info!("Reset delay completed");
 
         // Clear any data that might have arrived during reset
+        #[cfg(feature = "defmt")]
+        info!("Clearing buffer after reset");
         let _ = player.clear_receive_buffer().await;
+        #[cfg(feature = "defmt")]
+        info!("Post-reset buffer clear completed");
 
         // Restore original timeout
         player.timeout_ms = original_timeout;
@@ -530,9 +544,11 @@ where
 
         // Configure SD card as the default media source
         #[cfg(feature = "defmt")]
-        info!("Setting playback source to SD card");
+        info!("About to set playback source to SD card");
 
         // Use the special init command here too
+        #[cfg(feature = "defmt")]
+        info!("Calling send_command_init for playback source");
         let _source_result = player
             .send_command_init(MessageData::new(
                 Command::SetPlaybackSource,
@@ -540,6 +556,8 @@ where
                 PlayBackSource::SDCard as u8,
             ))
             .await;
+        #[cfg(feature = "defmt")]
+        info!("Playback source command completed");
 
         if let Err(_e) = _source_result {
             #[cfg(feature = "defmt")]
@@ -550,16 +568,24 @@ where
         }
 
         // Add a delay after source selection
+        #[cfg(feature = "defmt")]
+        info!("Adding 200ms delay after source selection");
         player.delay.delay_ms(200).await;
+        #[cfg(feature = "defmt")]
+        info!("Source selection delay completed");
 
         // Set initial volume to a moderate level
         #[cfg(feature = "defmt")]
-        info!("Setting initial volume");
+        info!("About to set initial volume");
 
         // Use the special init command here too
+        #[cfg(feature = "defmt")]
+        info!("Calling send_command_init for volume");
         let _vol_result = player
             .send_command_init(MessageData::new(Command::SetVolume, 0, 15))
             .await;
+        #[cfg(feature = "defmt")]
+        info!("Volume command completed");
 
         if let Err(_e) = _vol_result {
             #[cfg(feature = "defmt")]
@@ -570,7 +596,7 @@ where
         }
 
         #[cfg(feature = "defmt")]
-        info!("DFPlayer initialization complete");
+        info!("=== DFPlayer initialization complete - SUCCESS! ===");
 
         Ok(player)
     }
@@ -1077,52 +1103,50 @@ where
     /// a clean communication state and prevent misinterpreting stale data as responses
     /// to new commands.
     async fn clear_receive_buffer(&mut self) -> Result<(), Error<S::Error>> {
+        #[cfg(feature = "defmt")]
+        info!("clear_receive_buffer: Starting buffer clear");
         let mut buffer = [0u8; 32];
-        let start = self.time_source.now();
 
-        // Try reading a few times with timeouts
-        for _ in 0..5 {
-            // First check if data is available to avoid blocking
-            let has_data = match self.port.read_ready() {
-                Ok(ready) => ready,
-                Err(_) => false, // Assume no data on error
-            };
+        // Simple approach: try to read once if data is available
+        #[cfg(feature = "defmt")]
+        info!("clear_receive_buffer: Checking if data is available");
 
-            if !has_data {
-                // No data available, don't block
+        let has_data = match self.port.read_ready() {
+            Ok(true) => {
                 #[cfg(feature = "defmt")]
-                info!("No data to clear");
-
-                // Short delay and continue
-                self.delay.delay_ms(10).await;
-                continue;
+                info!("clear_receive_buffer: Data is available, reading");
+                true
             }
+            _ => {
+                #[cfg(feature = "defmt")]
+                info!("clear_receive_buffer: No data available");
+                false
+            }
+        };
 
-            // Data is available, read and discard it
+        if has_data {
+            // Try to read the available data
             match self.port.read(&mut buffer).await {
                 Ok(0) => {
-                    // No data was actually read
-                    self.delay.delay_ms(10).await;
+                    #[cfg(feature = "defmt")]
+                    info!("clear_receive_buffer: Read returned 0 bytes");
                 }
                 Ok(_n) => {
                     #[cfg(feature = "defmt")]
                     info!("Cleared {} bytes: {:?}", _n, &buffer[.._n]);
-                    // Short delay and try again
-                    self.delay.delay_ms(10).await;
                 }
                 Err(_e) => {
                     #[cfg(feature = "defmt")]
-                    info!("Clear buffer read error: {:?}", Debug2Format(&_e));
-                    self.delay.delay_ms(10).await;
+                    info!(
+                        "clear_receive_buffer: Read error: {:?}",
+                        Debug2Format(&_e)
+                    );
                 }
-            }
-
-            // Check if we've been trying too long
-            if self.time_source.is_elapsed(start, 100) {
-                break;
             }
         }
 
+        #[cfg(feature = "defmt")]
+        info!("clear_receive_buffer: Completed successfully");
         Ok(())
     }
 
@@ -1333,8 +1357,8 @@ where
     ///
     /// This command plays all tracks in a specified folder in sequence,
     /// and loops back to the first track when the end is reached.
-    /// The folder names must be formatted with two digits, starting 
-    /// from 01 to 99 and not exceeding 99. With this command, you can 
+    /// The folder names must be formatted with two digits, starting
+    /// from 01 to 99 and not exceeding 99. With this command, you can
     /// store more than 255 tracks in a folder.
     ///
     /// # Arguments
@@ -1350,12 +1374,8 @@ where
             return Err(Error::BadParameter);
         }
 
-        self.send_command(MessageData::new(
-            Command::PlayLoopFolder,
-            0,
-            folder,
-        ))
-        .await
+        self.send_command(MessageData::new(Command::PlayLoopFolder, 0, folder))
+            .await
     }
 
     /// Play tracks in random order

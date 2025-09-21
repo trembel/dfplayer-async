@@ -21,7 +21,7 @@
 #![no_std]
 #![no_main]
 
-use defmt::{error, info, Debug2Format};
+use defmt::{Debug2Format, error, info};
 use dfplayer_async::{DfPlayer, TimeSource};
 use embassy_executor::Spawner;
 use embassy_rp::{
@@ -101,7 +101,7 @@ async fn main(_spawner: Spawner) {
     }
 
     // Create the DFPlayer Mini instance
-    let mut dfplayer = match DfPlayer::try_new(
+    let mut dfplayer = match DfPlayer::new(
         &mut uart,
         feedback_enable,
         timeout_ms,
@@ -163,7 +163,6 @@ async fn main(_spawner: Spawner) {
         Ok(_) => info!("Wake up command sent successfully"),
         Err(e) => error!("Failed to wake up device: {}", Debug2Format(&e)),
     }
-
 
     // Wait a moment for the device to fully wake up
     Timer::after(Duration::from_secs(1)).await;
