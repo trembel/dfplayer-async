@@ -55,7 +55,7 @@ use embedded_hal_async::delay::DelayNs;
 use embedded_io_async::{Read, ReadReady, Write};
 
 #[cfg(feature = "defmt")]
-use defmt::{Debug2Format, info};
+use defmt::{Debug2Format, debug, trace};
 
 // Protocol constants
 const START_BYTE: u8 = 0x7E;
@@ -482,7 +482,7 @@ where
         reset_duration_override: Option<u64>,
     ) -> Result<Self, Error<S::Error>> {
         #[cfg(feature = "defmt")]
-        info!("=== DfPlayer::new starting ===");
+        debug!("=== DfPlayer::new starting ===");
         let mut player = Self {
             port,
             feedback_enable,
@@ -496,14 +496,14 @@ where
 
         // Clear any pending data in the receive buffer first
         #[cfg(feature = "defmt")]
-        info!("Clearing initial receive buffer");
+        trace!("Clearing initial receive buffer");
         let _ = player.clear_receive_buffer().await;
         #[cfg(feature = "defmt")]
-        info!("Initial buffer clear completed");
+        trace!("Initial buffer clear completed");
 
         // Send reset command with longer timeout for initialization
         #[cfg(feature = "defmt")]
-        info!("About to send reset command");
+        trace!("About to send reset command");
 
         // Store original timeout and use a longer one for reset
         let original_timeout = player.timeout_ms;
@@ -511,27 +511,27 @@ where
 
         // Send the reset command using the special init version that won't hang
         #[cfg(feature = "defmt")]
-        info!("Calling send_command_init for reset");
+        trace!("Calling send_command_init for reset");
         let _reset_result = player
             .send_command_init(MessageData::new(Command::Reset, 0, 0))
             .await;
         #[cfg(feature = "defmt")]
-        info!("Reset command send_command_init completed");
+        trace!("Reset command send_command_init completed");
 
         // Wait for device reset regardless of command result
         let wait_ms = reset_duration_override.unwrap_or(1500);
         #[cfg(feature = "defmt")]
-        info!("Waiting {}ms for device reset", wait_ms);
+        trace!("Waiting {}ms for device reset", wait_ms);
         player.delay.delay_ms(wait_ms as u32).await;
         #[cfg(feature = "defmt")]
-        info!("Reset delay completed");
+        trace!("Reset delay completed");
 
         // Clear any data that might have arrived during reset
         #[cfg(feature = "defmt")]
-        info!("Clearing buffer after reset");
+        trace!("Clearing buffer after reset");
         let _ = player.clear_receive_buffer().await;
         #[cfg(feature = "defmt")]
-        info!("Post-reset buffer clear completed");
+        trace!("Post-reset buffer clear completed");
 
         // Restore original timeout
         player.timeout_ms = original_timeout;
@@ -539,16 +539,16 @@ where
         // Continue even if reset command had issues
         if let Err(_e) = _reset_result {
             #[cfg(feature = "defmt")]
-            info!("Reset error: {:?} - continuing anyway", Debug2Format(&_e));
+            debug!("Reset error: {:?} - continuing anyway", Debug2Format(&_e));
         }
 
         // Configure SD card as the default media source
         #[cfg(feature = "defmt")]
-        info!("About to set playback source to SD card");
+        trace!("About to set playback source to SD card");
 
         // Use the special init command here too
         #[cfg(feature = "defmt")]
-        info!("Calling send_command_init for playback source");
+        trace!("Calling send_command_init for playback source");
         let _source_result = player
             .send_command_init(MessageData::new(
                 Command::SetPlaybackSource,
@@ -557,11 +557,11 @@ where
             ))
             .await;
         #[cfg(feature = "defmt")]
-        info!("Playback source command completed");
+        trace!("Playback source command completed");
 
         if let Err(_e) = _source_result {
             #[cfg(feature = "defmt")]
-            info!(
+            debug!(
                 "Source select warning: {:?} - continuing anyway",
                 Debug2Format(&_e)
             );
@@ -569,34 +569,34 @@ where
 
         // Add a delay after source selection
         #[cfg(feature = "defmt")]
-        info!("Adding 200ms delay after source selection");
+        trace!("Adding 200ms delay after source selection");
         player.delay.delay_ms(200).await;
         #[cfg(feature = "defmt")]
-        info!("Source selection delay completed");
+        trace!("Source selection delay completed");
 
         // Set initial volume to a moderate level
         #[cfg(feature = "defmt")]
-        info!("About to set initial volume");
+        trace!("About to set initial volume");
 
         // Use the special init command here too
         #[cfg(feature = "defmt")]
-        info!("Calling send_command_init for volume");
+        trace!("Calling send_command_init for volume");
         let _vol_result = player
             .send_command_init(MessageData::new(Command::SetVolume, 0, 15))
             .await;
         #[cfg(feature = "defmt")]
-        info!("Volume command completed");
+        trace!("Volume command completed");
 
         if let Err(_e) = _vol_result {
             #[cfg(feature = "defmt")]
-            info!(
+            debug!(
                 "Volume set warning: {:?} - continuing anyway",
                 Debug2Format(&_e)
             );
         }
 
         #[cfg(feature = "defmt")]
-        info!("=== DFPlayer initialization complete - SUCCESS! ===");
+        debug!("=== DFPlayer initialization complete - SUCCESS! ===");
 
         Ok(player)
     }
@@ -629,7 +629,7 @@ where
                     Ok(n) => n,
                     Err(_e) => {
                         #[cfg(feature = "defmt")]
-                        info!(
+                        trace!(
                             "Read error, will retry: {:?}",
                             Debug2Format(&_e)
                         );
@@ -651,7 +651,7 @@ where
                         }
                         Err(_e) => {
                             #[cfg(feature = "defmt")]
-                            info!("Read error: {:?}", Debug2Format(&_e));
+                            debug!("Read error: {:?}", Debug2Format(&_e));
                             self.delay.delay_ms(10).await;
                             continue;
                         }
@@ -661,7 +661,7 @@ where
 
             #[cfg(feature = "defmt")]
             if bytes_read > 0 {
-                info!(
+                trace!(
                     "Read {} bytes: {:?}",
                     bytes_read,
                     &receive_buffer[..bytes_read]
@@ -683,7 +683,7 @@ where
                     self.last_response.param_l = receive_buffer[4];
 
                     #[cfg(feature = "defmt")]
-                    info!(
+                    trace!(
                         "Parsed 8-byte response: cmd={:?}, params={},{}",
                         cmd,
                         self.last_response.param_h,
@@ -713,7 +713,7 @@ where
                         if byte == END_BYTE {
                             // Complete message received, validate and process
                             #[cfg(feature = "defmt")]
-                            info!("Complete message: {:?}", message);
+                            trace!("Complete message: {:?}", message);
 
                             // Validate checksum
                             let read_checksum = ((message[7] as u16) << 8)
@@ -752,7 +752,7 @@ where
                                 }
                             } else {
                                 #[cfg(feature = "defmt")]
-                                info!(
+                                debug!(
                                     "Checksum mismatch: expected {:04X}, got {:04X}",
                                     calc_checksum, read_checksum
                                 );
@@ -773,12 +773,12 @@ where
 
         // If we reached here, we timed out with no valid response
         #[cfg(feature = "defmt")]
-        info!("Timeout waiting for response");
+        debug!("Timeout waiting for response");
 
         // Special case for reset command - just return success
         if self.last_command.command == Command::Reset {
             #[cfg(feature = "defmt")]
-            info!("Ignoring timeout for reset command");
+            trace!("Ignoring timeout for reset command");
             return Ok(());
         }
 
@@ -823,7 +823,7 @@ where
 
         // Log the message being sent
         #[cfg(feature = "defmt")]
-        info!("tx {}", out_buffer);
+        trace!("tx {}", out_buffer);
 
         // Send the message to the device
         self.port
@@ -838,7 +838,7 @@ where
         // If feedback is disabled, don't even try to read a response during initialization
         if !self.feedback_enable {
             #[cfg(feature = "defmt")]
-            info!(
+            trace!(
                 "Skipping response wait during initialization (feedback disabled)"
             );
 
@@ -861,15 +861,15 @@ where
         match result {
             Ok(_) => {
                 #[cfg(feature = "defmt")]
-                info!("Initialization command received response");
+                trace!("Initialization command received response");
             }
             Err(Error::UserTimeout) => {
                 #[cfg(feature = "defmt")]
-                info!("Initialization command timed out (continuing anyway)");
+                trace!("Initialization command timed out (continuing anyway)");
             }
             Err(_e) => {
                 #[cfg(feature = "defmt")]
-                info!("Initialization command error: {:?}", Debug2Format(&_e));
+                trace!("Initialization command error: {:?}", Debug2Format(&_e));
             }
         }
 
@@ -915,7 +915,7 @@ where
 
         // Log the message being sent
         #[cfg(feature = "defmt")]
-        info!("tx {}", out_buffer);
+        trace!("tx {}", out_buffer);
 
         // Send the message to the device
         self.port
@@ -953,7 +953,7 @@ where
                     // ACK received, now we need the data response for queries
                     if is_query_command {
                         #[cfg(feature = "defmt")]
-                        info!("Reading data response after ACK for query");
+                        trace!("Reading data response after ACK for query");
 
                         // Read the data response - use a short delay if needed
                         self.delay.delay_ms(20).await;
@@ -961,11 +961,11 @@ where
                         match self.read_last_message().await {
                             Ok(_) => {
                                 #[cfg(feature = "defmt")]
-                                info!("Received data response for query");
+                                trace!("Received data response for query");
                             }
                             Err(e) => {
                                 #[cfg(feature = "defmt")]
-                                info!(
+                                debug!(
                                     "Error reading data response: {:?}",
                                     Debug2Format(&e)
                                 );
@@ -978,7 +978,7 @@ where
                     // Response but no ACK
                     if command_data.command != Command::Reset {
                         #[cfg(feature = "defmt")]
-                        info!("Expected ACK not received");
+                        debug!("Expected ACK not received");
                         return Err(Error::FailedAck);
                     }
                 }
@@ -1004,7 +1004,7 @@ where
                         Ok(n) => n,
                         Err(e) => {
                             #[cfg(feature = "defmt")]
-                            info!("Read error: {:?}", Debug2Format(&e));
+                            debug!("Read error: {:?}", Debug2Format(&e));
                             if attempts == max_attempts {
                                 return Err(Error::SerialPort(e));
                             }
@@ -1015,7 +1015,7 @@ where
 
                     #[cfg(feature = "defmt")]
                     if bytes_read > 0 {
-                        info!(
+                        debug!(
                             "Response (attempt {}): {:?}",
                             attempts,
                             &buffer[..bytes_read]
@@ -1038,7 +1038,7 @@ where
                             if command_data.command == Command::QueryTrackCntSD
                             {
                                 #[cfg(feature = "defmt")]
-                                info!(
+                                trace!(
                                     "Got response for track count query: {:?}, value={}",
                                     cmd, buffer[INDEX_PARAM_L]
                                 );
@@ -1048,14 +1048,14 @@ where
                             // For other commands, verify it matches what we sent
                             if cmd == command_data.command {
                                 #[cfg(feature = "defmt")]
-                                info!(
+                                trace!(
                                     "Got matching response: {:?}, value={}",
                                     cmd, buffer[INDEX_PARAM_L]
                                 );
                                 return Ok(());
                             } else {
                                 #[cfg(feature = "defmt")]
-                                info!(
+                                debug!(
                                     "Response command mismatch: expected {:?}, got {:?}",
                                     command_data.command, cmd
                                 );
@@ -1072,7 +1072,7 @@ where
                 // Special case: for track count query, don't fail if we'll check for delayed response
                 if command_data.command == Command::QueryTrackCntSD {
                     #[cfg(feature = "defmt")]
-                    info!(
+                    debug!(
                         "No immediate track count response, will check for delayed response"
                     );
                     return Ok(());
@@ -1080,7 +1080,7 @@ where
 
                 // If we get here, we didn't get a proper response
                 #[cfg(feature = "defmt")]
-                info!(
+                debug!(
                     "Failed to get proper response after {} attempts",
                     max_attempts
                 );
@@ -1104,22 +1104,22 @@ where
     /// to new commands.
     async fn clear_receive_buffer(&mut self) -> Result<(), Error<S::Error>> {
         #[cfg(feature = "defmt")]
-        info!("clear_receive_buffer: Starting buffer clear");
+        trace!("clear_receive_buffer: Starting buffer clear");
         let mut buffer = [0u8; 32];
 
         // Simple approach: try to read once if data is available
         #[cfg(feature = "defmt")]
-        info!("clear_receive_buffer: Checking if data is available");
+        trace!("clear_receive_buffer: Checking if data is available");
 
         let has_data = match self.port.read_ready() {
             Ok(true) => {
                 #[cfg(feature = "defmt")]
-                info!("clear_receive_buffer: Data is available, reading");
+                trace!("clear_receive_buffer: Data is available, reading");
                 true
             }
             _ => {
                 #[cfg(feature = "defmt")]
-                info!("clear_receive_buffer: No data available");
+                trace!("clear_receive_buffer: No data available");
                 false
             }
         };
@@ -1129,15 +1129,15 @@ where
             match self.port.read(&mut buffer).await {
                 Ok(0) => {
                     #[cfg(feature = "defmt")]
-                    info!("clear_receive_buffer: Read returned 0 bytes");
+                    trace!("clear_receive_buffer: Read returned 0 bytes");
                 }
                 Ok(_n) => {
                     #[cfg(feature = "defmt")]
-                    info!("Cleared {} bytes: {:?}", _n, &buffer[.._n]);
+                    trace!("Cleared {} bytes: {:?}", _n, &buffer[.._n]);
                 }
                 Err(_e) => {
                     #[cfg(feature = "defmt")]
-                    info!(
+                    debug!(
                         "clear_receive_buffer: Read error: {:?}",
                         Debug2Format(&_e)
                     );
@@ -1146,7 +1146,7 @@ where
         }
 
         #[cfg(feature = "defmt")]
-        info!("clear_receive_buffer: Completed successfully");
+        trace!("clear_receive_buffer: Completed successfully");
         Ok(())
     }
 
@@ -1491,7 +1491,7 @@ where
 
         // If we get here, the normal wake command failed and we want to try reset
         #[cfg(feature = "defmt")]
-        info!("Normal wake failed, trying reset");
+        debug!("Normal wake failed, trying reset");
 
         // Fall back to reset as a more reliable way to wake the device
         self.reset(reset_duration_override).await
